@@ -24,7 +24,7 @@ if not os.path.exists(str_cwd):
     sys.path.append(cwdp)
 else:
     sys.path.append(str_cwd)
-exit()
+
 #%% UDF
 def corrmatrix(df: pd.DataFrame = None, 
                corrM: str = 'spearman') -> pd.DataFrame:
@@ -90,24 +90,13 @@ def pca_assess(df, plt_size = (15,7), str_mode = 'chg'):
         components needed to explain at least 80%.
     """
     from sklearn.decomposition import PCA
+    from sklearn.preprocessing import StandardScaler
     sclr = StandardScaler()
     
-    # securities and date ranges verification
-    df_ = sliceDataFrame(df=df, dt_start=dt_start, 
-                         dt_end=dt_end, lst_securities=lst_securities)
-    
-    # levels2changes
-    if str_mode == 'chg':
-        tmpdf = df_.diff().dropna()*100
-    elif str_mode == 'ret':
-        tmpdf = df_.apply(np.log).diff().dropna()
-    else:
-        tmpdf = df_.copy()
-    
     # data scaling transform
-    tmpdf_scld = pd.DataFrame(sclr.fit_transform(tmpdf), 
-                              columns=tmpdf.columns,
-                              index=tmpdf.index)
+    tmpdf_scld = pd.DataFrame(sclr.fit_transform(df), 
+                              columns=df.columns,
+                              index=df.index)
     
     # PCA fit
     pca_out = PCA().fit(tmpdf_scld)
@@ -292,37 +281,76 @@ plot_heatM(tmp, vmin=tmp.min().min(),
            plot_title='Cov\nPartially filled vs Fully filled')
 
 #%% RETURNS COVARIANCE
-# returns
+# Asset returns
+returns_ = data_r_gmm.drop('issue_id', axis=1)
 returns__ = data_r_gmm2.drop('issue_id', axis=1)
-# Full
-cov_rr = returns__.T.cov()
-# XS_FX
-X_F_X = X@S_F__@X.T
-# Specific returns :: Given R ~ X@F + U, 
-u = data_r_gmm2.drop('issue_id', axis=1) - X@F__
 
-# Specific returns covar matrix
-Delta_v1 = u.T.cov()
+# Residual (specific) returns :: Given R ~ X@F + U, 
+u__ = returns__ - X@F__
+u_ = returns_ - X@F_
 
-## by equation :: cov_rr ~ XFX + Delta
-Delta_v2 = cov_rr - X_F_X
+# Specific returns covarciance matrix
+Delta__ = u__.T.cov()
+Delta_ = u_.T.cov()
 
-# Specific risk vector
-srv = np.diag(Delta_v1)
+# Specific risk
+srv__ = np.sqrt(np.diag(Delta__))
+srv_ = np.sqrt(np.diag(Delta_))
+df_srvs = pd.DataFrame(zip(srv__,srv_))
+## viz between partially and fully filled NAs - 99pct of values
+plt.figure(figsize=(12,8))
+df_srvs.iloc[np.unique(np.where(df_srvs <= df_srvs.quantile(.99))[0]),:].\
+    plot.scatter(x=0,y=1,xlabel='Full',ylabel='Partial', 
+                 title='Specific Risks \nScatter Plot Between NA-Fill Methods')
+plt.tight_layout(); plt.show()
 
-# Asset with huge specific risk
-issue_id = data_r['issue_id'][np.where(srv == srv.max())[0]].values[0]
-tmpdates = ['2009Nov06','2009Nov13','2009Nov20','2009Nov27','2009Dec04',
-            '2009Dec11','2009Dec18','2009Dec25']
-idx_issueid = np.where(data_r['issue_id'] == issue_id)[0]
-print(data_r.loc[idx_issueid, tmpdates].T)
-tmpA_Ridx = np.cumprod(data_r.loc[idx_issueid,:].drop('issue_id',axis=1).T+1)
+## ibid. - Top 1pct of values w/o max-value point
+plt.figure(figsize=(12,8))
+df_srvs.iloc[np.unique(np.where(df_srvs > df_srvs.quantile(.99))[0]),:].\
+    drop(155).plot.scatter(x=0,y=1,xlabel='Full',ylabel='Partial', 
+                 title='Specific Risks \nScatter Plot Between NA-Fill Methods')
+plt.tight_layout(); plt.show()
 
 # Viz assets specific risk
-tmpseldf = pd.DataFrame(srv).drop(155).iloc[np.where(pd.DataFrame(srv).drop(155)<=10)[0],:]
-tmpseldf2 = pd.DataFrame(srv).drop(155).iloc[np.where(pd.DataFrame(srv).drop(155)>10)[0],:]
+tmpseldf = df_srvs.\
+    iloc[np.unique(np.where(df_srvs <= df_srvs.quantile(.99))[0]),0]
+tmpseldf2 = df_srvs.\
+    iloc[np.unique(np.where(df_srvs > df_srvs.quantile(.99))[0]),0]
+## values below 99 percentile
 plt.figure(figsize=(12,8))
-tmpseldf.plot.bar(legend=None,width=2,xlabel='Asset',ylabel='Specific Risk')
+tmpseldf.plot.bar(legend=None,width=2,xlabel='Asset',ylabel='Specific Risk',
+                  title='Specific risks below the 99 precentile')
 plt.locator_params(axis='x', nbins=50)
 plt.xticks(fontsize=5)
 plt.tight_layout();plt.show()
+
+## values above 99 percentile
+plt.figure(figsize=(12,8))
+tmpseldf2.plot.bar(legend=None,width=2,xlabel='Asset',ylabel='Specific Risk',
+                  title='Specific risks above the 99 precentile (top 1%)')
+#plt.locator_params(axis='x', nbins=50)
+plt.xticks(fontsize=5)
+plt.tight_layout();plt.show()
+
+# Assets with specific risk at the top 1% 
+## Max specific risk asset viz
+issue_id = data_r['issue_id'][np.where(srv__ == srv__.max())[0]].values[0]
+tmpdates = ['2009Nov06','2009Nov13','2009Nov20','2009Nov27','2009Dec04',
+            '2009Dec11','2009Dec18','2009Dec25']
+idx_issueid = np.where(data_r['issue_id'] == issue_id)[0]
+maxsvr_asset_jump_period = data_r.loc[idx_issueid, tmpdates].T
+tmpA_Ridx = np.cumprod(data_r.loc[idx_issueid,:].drop('issue_id',axis=1).T+1)
+## viz
+plt.figure(figsize=(12,8))
+tmpA_Ridx.plot(color='darkcyan',legend=None, 
+               title='Cumulative Returns\nTop Secific Risk Asset')
+plt.tight_layout();plt.show()
+
+#%% SUMMARY
+print(f'\n(1) Factor returns matrix:\n\n{F__}')
+print(f'\n(2) Factor covariance matrix:\n\n{S_F__}')
+print(f'\n(3) Specific risk:\n\n{df_srvs[[0]]}')
+
+
+
+
